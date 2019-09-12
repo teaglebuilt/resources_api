@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from algoliasearch.exceptions import AlgoliaUnreachableHostException, AlgoliaException
 from app.api import bp
 from app.api.auth import is_user_oc_member, authenticate
-from app.api.validations import validate_resource, requires_body
+from app.api.validations import validate_resource, validate_resource_list, requires_body
 from app.models import Language, Resource, Category, Key
 from app import Config, db, index
 from dateutil import parser
@@ -34,11 +34,21 @@ def resources():
 @requires_body
 @authenticate
 def post_resources():
-    validation_errors = validate_resource(request)
+    json = request.get_json()
+
+    if isinstance(json, list):
+        validation_errors = validate_resource_list(request, json)
+
+    elif isinstance(json, dict):
+        validation_errors = validate_resource(request, json)
+
+    else:
+        msg = "This endpoint accepts a resource object or a list of resource objects"
+        validation_errors = {"errors": {"invalid-type": {"message": msg}}}
 
     if validation_errors:
         return utils.standardize_response(payload=validation_errors, status_code=422)
-    return create_resource(request.get_json(), db)
+    return create_resources(json, db)
 
 
 @latency_summary.time()
@@ -54,7 +64,7 @@ def resource(id):
 @requires_body
 @authenticate
 def put_resource(id):
-    validation_errors = validate_resource(request, id)
+    validation_errors = validate_resource(request, request.get_json(), id)
 
     if validation_errors:
         return utils.standardize_response(payload=validation_errors, status_code=422)
@@ -430,6 +440,27 @@ def update_resource(id, json, db):
         return utils.standardize_response(status_code=500)
 
 
+def create_resources(json, db):
+    try:
+        if isinstance(json, dict):
+            return utils.standardize_response(payload=dict(
+                data=create_resource(json, db)))
+
+        created_resources_list = []
+        for res in json:
+            created_resources_list.append(create_resource(res, db))
+
+        return utils.standardize_response(payload=dict(data=created_resources_list))
+
+    except IntegrityError as e:
+        logger.exception(e)
+        return utils.standardize_response(status_code=422)
+
+    except Exception as e:
+        logger.exception(e)
+        return utils.standardize_response(status_code=500)
+
+
 def create_resource(json, db):
     langs, categ = get_attributes(json)
     new_resource = Resource(
@@ -449,12 +480,4 @@ def create_resource(json, db):
         logger.exception(e)
         print(f"Algolia failed to index new resource '{new_resource.name}'")
 
-    except IntegrityError as e:
-        logger.exception(e)
-        return utils.standardize_response(status_code=422)
-
-    except Exception as e:
-        logger.exception(e)
-        return utils.standardize_response(status_code=500)
-
-    return utils.standardize_response(payload=dict(data=new_resource.serialize))
+    return new_resource.serialize

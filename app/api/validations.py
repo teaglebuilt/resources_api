@@ -24,9 +24,19 @@ def missing_json_error():
     return standardize_response(error, status_code=422)
 
 
-def validate_resource(request, id=-1):
+def validate_resource_list(req, rlist):
+    errors = {'errors': {}}
+    for i, r in enumerate(rlist):
+        validation = validate_resource(req, r)
+        if validation:
+            errors['errors'][f'resource-{i}'] = validation
+
+    if bool(errors['errors']):
+        return errors
+
+
+def validate_resource(request, json, id=-1):
     errors = None
-    json = request.get_json()
     validation_errors = {"errors": {}}
     missing_params = {"params": []}
     invalid_params = {"params": []}
