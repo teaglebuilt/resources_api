@@ -446,11 +446,9 @@ def create_resources(json, db):
             return utils.standardize_response(payload=dict(
                 data=create_resource(json, db)))
 
-        created_resources_list = []
-        for res in json:
-            created_resources_list.append(create_resource(res, db))
+        created_resources = [create_resource(resource, db) for resource in json]
 
-        return utils.standardize_response(payload=dict(data=created_resources_list))
+        return utils.standardize_response(payload=dict(data=created_resources))
 
     except IntegrityError as e:
         logger.exception(e)
