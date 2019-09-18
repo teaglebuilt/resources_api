@@ -26,6 +26,12 @@ def missing_json_error():
 
 def validate_resource_list(req, rlist):
     errors = {'errors': {}}
+    max_resources = 200
+
+    if len(rlist) > max_resources:
+        msg = f"This endpoint will accept a max of {max_resources} resources"
+        return {"errors": {"too-long": {"message": msg}}}
+
     for i, r in enumerate(rlist):
         validation = validate_resource(req, r)
         if validation:
