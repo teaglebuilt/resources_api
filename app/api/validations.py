@@ -125,3 +125,10 @@ def validate_resource(request, json, id=-1):
 
     if errors:
         return validation_errors
+
+
+def wrong_type(type_accepted):
+    msg = f"This endpoint accepts a {type_accepted}"
+    validation_errors = {"errors": {"invalid-type": {"message": msg}}}
+
+    return standardize_response(payload=validation_errors, status_code=422)

@@ -4,7 +4,8 @@ from sqlalchemy.exc import IntegrityError
 from algoliasearch.exceptions import AlgoliaUnreachableHostException, AlgoliaException
 from app.api import bp
 from app.api.auth import is_user_oc_member, authenticate
-from app.api.validations import validate_resource, validate_resource_list, requires_body
+from app.api.validations import validate_resource, validate_resource_list, \
+    requires_body, wrong_type
 from app.models import Language, Resource, Category, Key
 from app import Config, db, index
 from dateutil import parser
@@ -36,18 +37,33 @@ def resources():
 def post_resources():
     json = request.get_json()
 
-    if isinstance(json, list):
-        validation_errors = validate_resource_list(request, json)
+    if not isinstance(json, dict):
+        return wrong_type("resource object")
 
-    elif isinstance(json, dict):
-        validation_errors = validate_resource(request, json)
-
-    else:
-        msg = "This endpoint accepts a resource object or a list of resource objects"
-        validation_errors = {"errors": {"invalid-type": {"message": msg}}}
+    validation_errors = validate_resource(request, json)
 
     if validation_errors:
         return utils.standardize_response(payload=validation_errors, status_code=422)
+
+    return create_resource(json, db)
+
+
+@latency_summary.time()
+@failures_counter.count_exceptions()
+@bp.route('/resources/bulk', methods=['POST'], endpoint='create_resource_bulk')
+@requires_body
+@authenticate
+def post_resources_bulk():
+    json = request.get_json()
+
+    if not isinstance(json, list):
+        return wrong_type("list of resources objects")
+
+    validation_errors = validate_resource_list(request, json)
+
+    if validation_errors:
+        return utils.standardize_response(payload=validation_errors, status_code=422)
+
     return create_resources(json, db)
 
 
@@ -442,18 +458,16 @@ def update_resource(id, json, db):
 
 def create_resources(json, db):
     try:
-        if isinstance(json, dict):
-            return utils.standardize_response(payload=dict(
-                data=create_resource(json, db)))
+        created_resources = []
 
-        created_resources = [create_resource(resource, db) for resource in json]
+        for resource in json:
+            res = create_resource(resource, db)
+            if not isinstance(res, dict):
+                raise Exception(res)
+
+            created_resources.append(res)
 
         return utils.standardize_response(payload=dict(data=created_resources))
-
-    except IntegrityError as e:
-        logger.exception(e)
-        return utils.standardize_response(status_code=422)
-
     except Exception as e:
         logger.exception(e)
         return utils.standardize_response(status_code=500)
@@ -474,8 +488,18 @@ def create_resource(json, db):
         db.session.commit()
         index.save_object(new_resource.serialize_algolia_search)
 
+    except IntegrityError as e:
+        logger.exception(e)
+        return utils.standardize_response(status_code=422)
+
+    except Exception as e:
+        logger.exception(e)
+        return utils.standardize_response(status_code=500)
+
     except (AlgoliaUnreachableHostException, AlgoliaException) as e:
         logger.exception(e)
-        print(f"Algolia failed to index new resource '{new_resource.name}'")
+        msg = f"Algolia failed to index new resource '{new_resource.name}'"
+        print(msg)
+        return msg
 
     return new_resource.serialize
